@@ -27,8 +27,6 @@ def proxy(path):
     
     headers = {k: v for k, v in request.headers if k.lower() not in ('host', 'content-length')}
     headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
-    # Override Host to match ERP (some servers check this)
-    headers['Host'] = urlparse(ERP_BASE).netloc
     
     try:
         resp = requests.request(
