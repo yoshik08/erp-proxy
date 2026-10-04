@@ -1,21 +1,34 @@
 from flask import Flask, request, Response
 import requests
+from urllib.parse import urlparse, urlunparse
 
 app = Flask(__name__)
 ERP_BASE = "https://newerp.kluniversity.in"
 TIMEOUT = 25
 
+def rewrite_location(location, proxy_base):
+    """Rewrite ERP redirect URLs to go through the proxy."""
+    if not location:
+        return location
+    # If it's a relative URL, leave it (will be resolved against proxy)
+    if location.startswith('/'):
+        return location
+    # If it's the ERP URL, rewrite to proxy URL
+    if location.startswith(ERP_BASE):
+        return proxy_base + location[len(ERP_BASE):]
+    return location
+
 @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'])
 @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'])
 def proxy(path):
     url = f"{ERP_BASE}/{path}"
-    # Forward query string
     if request.query_string:
         url += f"?{request.query_string.decode()}"
     
-    # Forward headers (excluding host)
     headers = {k: v for k, v in request.headers if k.lower() not in ('host', 'content-length')}
     headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+    # Override Host to match ERP (some servers check this)
+    headers['Host'] = urlparse(ERP_BASE).netloc
     
     try:
         resp = requests.request(
@@ -27,9 +40,15 @@ def proxy(path):
             allow_redirects=False,
             timeout=TIMEOUT
         )
-        # Build response
         excluded = ('content-encoding', 'content-length', 'transfer-encoding', 'connection')
-        resp_headers = [(k, v) for k, v in resp.headers.items() if k.lower() not in excluded]
+        resp_headers = []
+        proxy_base = request.host_url.rstrip('/')
+        for k, v in resp.headers.items():
+            if k.lower() in excluded:
+                continue
+            if k.lower() == 'location':
+                v = rewrite_location(v, proxy_base)
+            resp_headers.append((k, v))
         return Response(resp.content, status=resp.status_code, headers=resp_headers)
     except requests.exceptions.Timeout:
         return Response('ERP timeout', status=504)
